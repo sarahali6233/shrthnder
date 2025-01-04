@@ -1,0 +1,4 @@
+pynput
+PyQt5
+pyobjc-framework-Quartz; sys_platform == 'darwin'
+pyautogui
