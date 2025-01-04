@@ -247,26 +247,25 @@ class KeyboardController:
                     'Z': 'Y'
                 }
                 
+                # Clear any pending keystrokes
+                pyautogui.sleep(0.1)
+                
+                # Delete the shorthand again to ensure clean state
+                pyautogui.press('backspace', presses=len(self.current_word))
+                
                 # Type with QWERTZ keyboard adjustments
                 for char in expansion:
                     if char in qwertz_map:
-                        mapped_char = qwertz_map[char]
-                        logging.info(f"Mapping {char} to {mapped_char} for QWERTZ keyboard")
-                        pyautogui.write(mapped_char)
+                        pyautogui.press(qwertz_map[char].lower())
                     elif char == "I":
-                        # Special handling for capital I
                         pyautogui.keyDown('shift')
                         pyautogui.press('i')
                         pyautogui.keyUp('shift')
                     elif char == "'":
-                        # Special handling for apostrophe on German keyboard
-                        pyautogui.keyDown('shift')
                         pyautogui.press('#')
-                        pyautogui.keyUp('shift')
                     else:
-                        pyautogui.write(char)
+                        pyautogui.press(char.lower())
                     pyautogui.sleep(0.02)
-                    logging.info(f"Typed character: {char}")
             else:
                 # Normal typing for matching language and keyboard
                 pyautogui.write(expansion)
