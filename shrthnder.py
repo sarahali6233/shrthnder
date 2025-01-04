@@ -155,6 +155,7 @@ class KeyboardController:
                 elif key.char in [' ', '.', ',', '!', '?']:
                     logging.info(f"Punctuation detected: {key.char}, checking word: {self.current_word}")
                     self.process_word()
+            logging.info(f"Key pressed: {key}")  # Add this line for debugging
         except AttributeError:
             if key == keyboard.Key.space:
                 logging.info(f"Space key detected, checking word: {self.current_word}")
@@ -162,6 +163,7 @@ class KeyboardController:
             elif key == keyboard.Key.enter:
                 logging.info(f"Enter key detected, checking word: {self.current_word}")
                 self.process_word()
+            logging.info(f"Special key pressed: {key}")  # Add this line for debugging
 
     def on_release(self, key):
         try:
@@ -188,10 +190,23 @@ class KeyboardController:
             for _ in range(len(self.current_word)):
                 pyautogui.press('backspace')
             
-            # Type the expansion
+            # Type the expansion with keyboard layout handling
             expansion = self.shorthand_map[self.current_word.lower()]
             logging.info(f"Expanding to: {expansion}")
-            pyautogui.write(expansion)
+            
+            # If using German layout, handle special characters
+            if self.layout_manager.layout == 'German':
+                # Use write with interval to ensure reliable typing
+                pyautogui.write(expansion, interval=0.02)
+                
+                # Alternative method if the above doesn't work:
+                # for char in expansion:
+                #     if char in 'aou':  # Characters that might need umlauts
+                #         pyautogui.press(char)
+                #     else:
+                #         pyautogui.write(char)
+            else:
+                pyautogui.write(expansion)
         else:
             logging.info(f"No expansion found for: {self.current_word}")
 
