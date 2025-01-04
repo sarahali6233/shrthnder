@@ -14,73 +14,38 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 class KeyboardLayoutManager:
     def __init__(self):
-        self.detect_keyboard_layout()
+        self.layout = "QWERTY"  # Default layout
+        self.detect_keyboard_layout()  # This will now just set an initial suggestion
         
     def detect_keyboard_layout(self):
+        """Detect keyboard layout as a suggestion only"""
         self.os_name = platform.system()
         logging.info(f"Detected OS: {self.os_name}")
         
         if self.os_name == "Darwin":  # macOS
             try:
-                # Use Terminal Input Source command to get keyboard layout
                 import subprocess
                 cmd = "defaults read ~/Library/Preferences/com.apple.HIToolbox.plist AppleSelectedInputSources | grep -w 'KeyboardLayout Name' | awk -F'\"' '{print $4}'"
                 result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
                 layout_name = result.stdout.strip()
-                logging.info(f"Raw keyboard layout from system: {layout_name}")
                 
-                # Map macOS keyboard names to our layout names
+                # Map macOS keyboard names to actual keyboard layouts
                 macos_layout_map = {
-                    "German": "German",
-                    "German-DIN": "German",
-                    "ABC": "English",
-                    "US": "English",
-                    "British": "English",
-                    "": "English"  # Default if empty
+                    "German": "QWERTZ",
+                    "German-DIN": "QWERTZ",
+                    "Swiss German": "QWERTZ",
+                    "ABC": "QWERTY",
+                    "US": "QWERTY",
+                    "British": "QWERTY",
+                    "": "QWERTY"
                 }
                 
-                self.layout = macos_layout_map.get(layout_name, "English")
-                logging.info(f"Mapped keyboard layout: {self.layout}")
+                # Just set as suggestion
+                self.layout = macos_layout_map.get(layout_name, "QWERTY")
+                logging.info(f"Suggested keyboard layout: {self.layout}")
             except Exception as e:
                 logging.error(f"Error detecting keyboard layout: {e}")
-                # Fallback to locale method
-                self.detect_from_locale()
-        else:
-            # For other operating systems, use locale method
-            self.detect_from_locale()
-            
-    def detect_from_locale(self):
-        # Get system locale
-        self.system_locale = locale.getdefaultlocale()[0]
-        logging.info(f"Detected system locale: {self.system_locale}")
-        
-        # Map common layouts
-        self.layout_map = {
-            'de_DE': 'German',
-            'de_AT': 'German',
-            'de_CH': 'German',
-            'en_US': 'English',
-            'en_GB': 'English',
-            'fr_FR': 'French',
-            'es_ES': 'Spanish'
-        }
-        
-        self.layout = self.layout_map.get(self.system_locale, 'English')
-        logging.info(f"Using keyboard layout from locale: {self.layout}")
-        
-    def is_alpha(self, key):
-        """Check if a key is alphabetic based on the current layout"""
-        try:
-            if hasattr(key, 'char'):
-                # For German keyboard, include umlauts and ß
-                if self.layout == 'German':
-                    german_chars = 'abcdefghijklmnopqrstuvwxyzäöüßABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ'
-                    return key.char in german_chars
-                # Add more layout-specific characters as needed
-                return key.char.isalpha()
-            return False
-        except AttributeError:
-            return False
+                self.layout = "QWERTY"
 
 class ShrthnderUI(QMainWindow):
     def __init__(self, keyboard_controller):
@@ -95,24 +60,36 @@ class ShrthnderUI(QMainWindow):
         
         layout = QVBoxLayout()
         
-        # Status and keyboard layout label
-        status_layout = QHBoxLayout()
+        # Status label
         self.status_label = QLabel("Shrthnder is running...")
-        self.keyboard_label = QLabel(f"Detected Keyboard: {self.keyboard_controller.layout_manager.layout}")
-        status_layout.addWidget(self.status_label)
-        status_layout.addWidget(self.keyboard_label)
-        layout.addLayout(status_layout)
+        layout.addWidget(self.status_label)
+        
+        # Settings section
+        settings_layout = QHBoxLayout()
         
         # Language selector
-        language_layout = QHBoxLayout()
+        language_group = QVBoxLayout()
         language_label = QLabel("Input Language:")
         self.language_combo = QComboBox()
         self.language_combo.addItems(["English", "German"])
         self.language_combo.setCurrentText(self.keyboard_controller.input_language)
         self.language_combo.currentTextChanged.connect(self.on_language_changed)
-        language_layout.addWidget(language_label)
-        language_layout.addWidget(self.language_combo)
-        layout.addLayout(language_layout)
+        language_group.addWidget(language_label)
+        language_group.addWidget(self.language_combo)
+        settings_layout.addLayout(language_group)
+        
+        # Keyboard layout selector
+        keyboard_group = QVBoxLayout()
+        keyboard_label = QLabel("Keyboard Layout:")
+        self.keyboard_combo = QComboBox()
+        self.keyboard_combo.addItems(["QWERTZ", "QWERTY", "AZERTY"])
+        self.keyboard_combo.setCurrentText(self.keyboard_controller.layout_manager.layout)
+        self.keyboard_combo.currentTextChanged.connect(self.on_keyboard_changed)
+        keyboard_group.addWidget(keyboard_label)
+        keyboard_group.addWidget(self.keyboard_combo)
+        settings_layout.addLayout(keyboard_group)
+        
+        layout.addLayout(settings_layout)
         
         # Add shorthand section
         shorthand_layout = QVBoxLayout()
@@ -143,6 +120,10 @@ class ShrthnderUI(QMainWindow):
     def on_language_changed(self, new_language):
         self.keyboard_controller.input_language = new_language
         logging.info(f"Input language changed to: {new_language}")
+
+    def on_keyboard_changed(self, new_layout):
+        self.keyboard_controller.layout_manager.layout = new_layout
+        logging.info(f"Keyboard layout changed to: {new_layout}")
 
     def load_shortcuts(self):
         if os.path.exists('shortcuts.json'):
@@ -245,11 +226,11 @@ class KeyboardController:
             expansion = self.shorthand_map[self.current_word.lower()]
             logging.info(f"Expanding to: {expansion} using {self.input_language} on {self.layout_manager.layout} keyboard")
             
-            if self.input_language == "English" and self.layout_manager.layout == "German":
-                # Special handling for apostrophe on German keyboard
+            if self.input_language == "English" and self.layout_manager.layout == "QWERTZ":
+                # Special handling for apostrophe on QWERTZ keyboard
                 for i, char in enumerate(expansion):
                     if char == "'":
-                        # For apostrophe on German keyboard, press the key right of Ä (usually #39)
+                        # For apostrophe on QWERTZ keyboard, press the key right of Ä (usually #39)
                         pyautogui.press("#")
                     elif char == "I":
                         # For capital I, use shift + i
