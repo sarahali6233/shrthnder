@@ -6,9 +6,50 @@ import pyautogui
 import json
 import os
 import logging
+import locale
+import platform
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+
+class KeyboardLayoutManager:
+    def __init__(self):
+        self.detect_keyboard_layout()
+        
+    def detect_keyboard_layout(self):
+        # Get system locale and platform
+        self.system_locale = locale.getdefaultlocale()[0]
+        self.os_name = platform.system()
+        logging.info(f"Detected system locale: {self.system_locale}")
+        logging.info(f"Detected OS: {self.os_name}")
+        
+        # Map common layouts
+        self.layout_map = {
+            'de_DE': 'German',
+            'de_AT': 'German',
+            'de_CH': 'German',
+            'en_US': 'English',
+            'en_GB': 'English',
+            'fr_FR': 'French',
+            'es_ES': 'Spanish'
+        }
+        
+        self.layout = self.layout_map.get(self.system_locale, 'English')
+        logging.info(f"Using keyboard layout: {self.layout}")
+        
+    def is_alpha(self, key):
+        """Check if a key is alphabetic based on the current layout"""
+        try:
+            if hasattr(key, 'char'):
+                # For German keyboard, include umlauts and ß
+                if self.layout == 'German':
+                    german_chars = 'abcdefghijklmnopqrstuvwxyzäöüßABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ'
+                    return key.char in german_chars
+                # Add more layout-specific characters as needed
+                return key.char.isalpha()
+            return False
+        except AttributeError:
+            return False
 
 class ShrthnderUI(QMainWindow):
     def __init__(self, keyboard_controller):
@@ -88,6 +129,7 @@ class KeyboardController:
     def __init__(self):
         self.current_word = ""
         self.shorthand_map = {}
+        self.layout_manager = KeyboardLayoutManager()
         self.load_shortcuts()
         logging.info(f"Initialized KeyboardController with shortcuts: {self.shorthand_map}")
         
@@ -107,7 +149,7 @@ class KeyboardController:
     def on_press(self, key):
         try:
             if hasattr(key, 'char'):
-                if key.char.isalpha():
+                if self.layout_manager.is_alpha(key):
                     self.current_word += key.char
                     logging.info(f"Current word buffer: {self.current_word}")
                 elif key.char in [' ', '.', ',', '!', '?']:
