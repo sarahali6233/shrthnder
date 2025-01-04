@@ -17,11 +17,42 @@ class KeyboardLayoutManager:
         self.detect_keyboard_layout()
         
     def detect_keyboard_layout(self):
-        # Get system locale and platform
-        self.system_locale = locale.getdefaultlocale()[0]
         self.os_name = platform.system()
-        logging.info(f"Detected system locale: {self.system_locale}")
         logging.info(f"Detected OS: {self.os_name}")
+        
+        if self.os_name == "Darwin":  # macOS
+            try:
+                # Use Terminal Input Source command to get keyboard layout
+                import subprocess
+                cmd = "defaults read ~/Library/Preferences/com.apple.HIToolbox.plist AppleSelectedInputSources | grep -w 'KeyboardLayout Name' | awk -F'\"' '{print $4}'"
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                layout_name = result.stdout.strip()
+                logging.info(f"Raw keyboard layout from system: {layout_name}")
+                
+                # Map macOS keyboard names to our layout names
+                macos_layout_map = {
+                    "German": "German",
+                    "German-DIN": "German",
+                    "ABC": "English",
+                    "US": "English",
+                    "British": "English",
+                    "": "English"  # Default if empty
+                }
+                
+                self.layout = macos_layout_map.get(layout_name, "English")
+                logging.info(f"Mapped keyboard layout: {self.layout}")
+            except Exception as e:
+                logging.error(f"Error detecting keyboard layout: {e}")
+                # Fallback to locale method
+                self.detect_from_locale()
+        else:
+            # For other operating systems, use locale method
+            self.detect_from_locale()
+            
+    def detect_from_locale(self):
+        # Get system locale
+        self.system_locale = locale.getdefaultlocale()[0]
+        logging.info(f"Detected system locale: {self.system_locale}")
         
         # Map common layouts
         self.layout_map = {
@@ -35,7 +66,7 @@ class KeyboardLayoutManager:
         }
         
         self.layout = self.layout_map.get(self.system_locale, 'English')
-        logging.info(f"Using keyboard layout: {self.layout}")
+        logging.info(f"Using keyboard layout from locale: {self.layout}")
         
     def is_alpha(self, key):
         """Check if a key is alphabetic based on the current layout"""
@@ -215,24 +246,20 @@ class KeyboardController:
             logging.info(f"Expanding to: {expansion} using {self.input_language} on {self.layout_manager.layout} keyboard")
             
             if self.input_language == "English" and self.layout_manager.layout == "German":
-                # Map common English characters to German keyboard equivalents
-                char_map = {
-                    "'": "ä",
-                    ";": "ö",
-                    "[": "ü",
-                    "{": "Ü",
-                    ":": "Ö",
-                    "\"": "Ä"
-                }
-                # Type with German keyboard adjustments
-                for char in expansion:
-                    if char in char_map:
-                        mapped_char = char_map[char]
-                        logging.info(f"Mapping character {char} to {mapped_char}")
-                        pyautogui.write(mapped_char)
+                # Special handling for apostrophe on German keyboard
+                for i, char in enumerate(expansion):
+                    if char == "'":
+                        # For apostrophe on German keyboard, press the key right of Ä (usually #39)
+                        pyautogui.press("#")
+                    elif char == "I":
+                        # For capital I, use shift + i
+                        pyautogui.keyDown('shift')
+                        pyautogui.press('i')
+                        pyautogui.keyUp('shift')
                     else:
                         pyautogui.write(char)
                     pyautogui.sleep(0.02)
+                    logging.info(f"Typed character: {char}")
             else:
                 # Normal typing for matching language and keyboard
                 for char in expansion:
