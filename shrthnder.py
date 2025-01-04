@@ -1,5 +1,5 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QPushButton, QWidget, QTableWidget, QTableWidgetItem, QLabel, QLineEdit
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QPushButton, QWidget, QTableWidget, QTableWidgetItem, QLabel, QLineEdit, QHBoxLayout, QComboBox
 from PyQt5.QtCore import Qt
 from pynput import keyboard
 import pyautogui
@@ -55,35 +55,33 @@ class ShrthnderUI(QMainWindow):
     def __init__(self, keyboard_controller):
         super().__init__()
         self.keyboard_controller = keyboard_controller
-        # Use the keyboard controller's shorthand map
         self.shorthand_map = keyboard_controller.shorthand_map
         self.setup_ui()
         
-    def load_shortcuts(self):
-        if os.path.exists('shortcuts.json'):
-            with open('shortcuts.json', 'r') as f:
-                return json.load(f)
-        return {
-            "btw": "by the way",
-            "idk": "I don't know",
-            "omw": "on my way"
-        }
-        
-    def save_shortcuts(self):
-        with open('shortcuts.json', 'w') as f:
-            json.dump(self.shorthand_map, f)
-            # Update the keyboard controller's shortcuts
-            self.keyboard_controller.shorthand_map = self.shorthand_map
-            
     def setup_ui(self):
         self.setWindowTitle("Shrthnder - Typing Efficiency Tool")
         self.setGeometry(100, 100, 600, 400)
         
         layout = QVBoxLayout()
         
-        # Status label
+        # Status and keyboard layout label
+        status_layout = QHBoxLayout()
         self.status_label = QLabel("Shrthnder is running...")
-        layout.addWidget(self.status_label)
+        self.keyboard_label = QLabel(f"Detected Keyboard: {self.keyboard_controller.layout_manager.layout}")
+        status_layout.addWidget(self.status_label)
+        status_layout.addWidget(self.keyboard_label)
+        layout.addLayout(status_layout)
+        
+        # Language selector
+        language_layout = QHBoxLayout()
+        language_label = QLabel("Input Language:")
+        self.language_combo = QComboBox()
+        self.language_combo.addItems(["English", "German"])
+        self.language_combo.setCurrentText(self.keyboard_controller.input_language)
+        self.language_combo.currentTextChanged.connect(self.on_language_changed)
+        language_layout.addWidget(language_label)
+        language_layout.addWidget(self.language_combo)
+        layout.addLayout(language_layout)
         
         # Add shorthand section
         shorthand_layout = QVBoxLayout()
@@ -110,7 +108,33 @@ class ShrthnderUI(QMainWindow):
         container = QWidget()
         container.setLayout(layout)
         self.setCentralWidget(container)
+
+    def on_language_changed(self, new_language):
+        self.keyboard_controller.input_language = new_language
+        logging.info(f"Input language changed to: {new_language}")
+
+    def load_shortcuts(self):
+        if os.path.exists('shortcuts.json'):
+            with open('shortcuts.json', 'r') as f:
+                return json.load(f)
+        return {
+            "btw": "by the way",
+            "idk": "I don't know",
+            "omw": "on my way"
+        }
         
+    def save_shortcuts(self):
+        with open('shortcuts.json', 'w') as f:
+            json.dump(self.shorthand_map, f)
+            # Update the keyboard controller's shortcuts
+            self.keyboard_controller.shorthand_map = self.shorthand_map
+            
+    def update_table(self):
+        self.table.setRowCount(len(self.shorthand_map))
+        for i, (shorthand, expansion) in enumerate(self.shorthand_map.items()):
+            self.table.setItem(i, 0, QTableWidgetItem(shorthand))
+            self.table.setItem(i, 1, QTableWidgetItem(expansion))
+
     def add_shorthand(self):
         shorthand = self.shorthand_input.text().strip()
         expansion = self.expansion_input.text().strip()
@@ -122,17 +146,12 @@ class ShrthnderUI(QMainWindow):
             self.shorthand_input.clear()
             self.expansion_input.clear()
             
-    def update_table(self):
-        self.table.setRowCount(len(self.shorthand_map))
-        for i, (shorthand, expansion) in enumerate(self.shorthand_map.items()):
-            self.table.setItem(i, 0, QTableWidgetItem(shorthand))
-            self.table.setItem(i, 1, QTableWidgetItem(expansion))
-
 class KeyboardController:
     def __init__(self):
         self.current_word = ""
         self.layout_manager = KeyboardLayoutManager()
         self.shorthand_map = self.load_shortcuts()
+        self.input_language = "English"  # Default input language
         logging.info(f"Initialized KeyboardController with shortcuts: {self.shorthand_map}")
         
     def load_shortcuts(self):
@@ -193,12 +212,33 @@ class KeyboardController:
             
             # Get the expansion and ensure it's the exact string from the shortcuts
             expansion = self.shorthand_map[self.current_word.lower()]
-            logging.info(f"Expanding to: {expansion}")
+            logging.info(f"Expanding to: {expansion} using {self.input_language} on {self.layout_manager.layout} keyboard")
             
-            # Use a small delay between characters for reliability
-            for char in expansion:
-                pyautogui.write(char, interval=0.02)
-                logging.info(f"Typed character: {char}")
+            if self.input_language == "English" and self.layout_manager.layout == "German":
+                # Map common English characters to German keyboard equivalents
+                char_map = {
+                    "'": "ä",
+                    ";": "ö",
+                    "[": "ü",
+                    "{": "Ü",
+                    ":": "Ö",
+                    "\"": "Ä"
+                }
+                # Type with German keyboard adjustments
+                for char in expansion:
+                    if char in char_map:
+                        mapped_char = char_map[char]
+                        logging.info(f"Mapping character {char} to {mapped_char}")
+                        pyautogui.write(mapped_char)
+                    else:
+                        pyautogui.write(char)
+                    pyautogui.sleep(0.02)
+            else:
+                # Normal typing for matching language and keyboard
+                for char in expansion:
+                    pyautogui.write(char)
+                    pyautogui.sleep(0.02)
+                    logging.info(f"Typed character: {char}")
         else:
             logging.info(f"No expansion found for: {self.current_word}")
 
