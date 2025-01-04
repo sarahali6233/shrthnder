@@ -55,7 +55,8 @@ class ShrthnderUI(QMainWindow):
     def __init__(self, keyboard_controller):
         super().__init__()
         self.keyboard_controller = keyboard_controller
-        self.shorthand_map = self.load_shortcuts()
+        # Use the keyboard controller's shorthand map
+        self.shorthand_map = keyboard_controller.shorthand_map
         self.setup_ui()
         
     def load_shortcuts(self):
@@ -71,6 +72,8 @@ class ShrthnderUI(QMainWindow):
     def save_shortcuts(self):
         with open('shortcuts.json', 'w') as f:
             json.dump(self.shorthand_map, f)
+            # Update the keyboard controller's shortcuts
+            self.keyboard_controller.shorthand_map = self.shorthand_map
             
     def setup_ui(self):
         self.setWindowTitle("Shrthnder - Typing Efficiency Tool")
@@ -128,23 +131,21 @@ class ShrthnderUI(QMainWindow):
 class KeyboardController:
     def __init__(self):
         self.current_word = ""
-        self.shorthand_map = {}
         self.layout_manager = KeyboardLayoutManager()
-        self.load_shortcuts()
+        self.shorthand_map = self.load_shortcuts()
         logging.info(f"Initialized KeyboardController with shortcuts: {self.shorthand_map}")
         
     def load_shortcuts(self):
         if os.path.exists('shortcuts.json'):
-            with open('shortcuts.json', 'r') as f:
-                self.shorthand_map = json.load(f)
-                logging.info(f"Loaded shortcuts from file: {self.shorthand_map}")
-        else:
-            self.shorthand_map = {
-                "btw": "by the way",
-                "idk": "I don't know",
-                "omw": "on my way"
-            }
-            logging.info(f"Using default shortcuts: {self.shorthand_map}")
+            with open('shortcuts.json', 'r', encoding='utf-8') as f:
+                shortcuts = json.load(f)
+                logging.info(f"Loaded shortcuts from file: {shortcuts}")
+                return shortcuts
+        return {
+            "btw": "by the way",
+            "idk": "I don't know",
+            "omw": "on my way"
+        }
     
     def on_press(self, key):
         try:
@@ -190,23 +191,14 @@ class KeyboardController:
             for _ in range(len(self.current_word)):
                 pyautogui.press('backspace')
             
-            # Type the expansion with keyboard layout handling
+            # Get the expansion and ensure it's the exact string from the shortcuts
             expansion = self.shorthand_map[self.current_word.lower()]
             logging.info(f"Expanding to: {expansion}")
             
-            # If using German layout, handle special characters
-            if self.layout_manager.layout == 'German':
-                # Use write with interval to ensure reliable typing
-                pyautogui.write(expansion, interval=0.02)
-                
-                # Alternative method if the above doesn't work:
-                # for char in expansion:
-                #     if char in 'aou':  # Characters that might need umlauts
-                #         pyautogui.press(char)
-                #     else:
-                #         pyautogui.write(char)
-            else:
-                pyautogui.write(expansion)
+            # Use a small delay between characters for reliability
+            for char in expansion:
+                pyautogui.write(char, interval=0.02)
+                logging.info(f"Typed character: {char}")
         else:
             logging.info(f"No expansion found for: {self.current_word}")
 
