@@ -180,33 +180,46 @@ class KeyboardController:
     
     def on_press(self, key):
         try:
-            if hasattr(key, 'char'):
-                if self.layout_manager.is_alpha(key):
-                    self.current_word += key.char
+            # Convert the key to string representation
+            if isinstance(key, keyboard.KeyCode):
+                char = key.char
+            else:
+                char = None
+                
+            if char:
+                logging.info(f"Key pressed: {char}")
+                if char.isalpha():
+                    self.current_word += char
                     logging.info(f"Current word buffer: {self.current_word}")
-                elif key.char in [' ', '.', ',', '!', '?']:
-                    logging.info(f"Punctuation detected: {key.char}, checking word: {self.current_word}")
+                elif char in [' ', '.', ',', '!', '?']:
+                    logging.info(f"Punctuation detected: {char}, checking word: {self.current_word}")
                     self.process_word()
-            logging.info(f"Key pressed: {key}")  # Add this line for debugging
-        except AttributeError:
-            if key == keyboard.Key.space:
+            elif key == keyboard.Key.space:
                 logging.info(f"Space key detected, checking word: {self.current_word}")
                 self.process_word()
             elif key == keyboard.Key.enter:
                 logging.info(f"Enter key detected, checking word: {self.current_word}")
                 self.process_word()
-            logging.info(f"Special key pressed: {key}")  # Add this line for debugging
+            elif key == keyboard.Key.backspace:
+                if self.current_word:
+                    self.current_word = self.current_word[:-1]
+                    logging.info(f"Backspace pressed, new buffer: {self.current_word}")
+                    
+        except AttributeError as e:
+            logging.error(f"Error processing key: {e}")
 
     def on_release(self, key):
         try:
             if key == keyboard.Key.space:
                 logging.info("Space key released")
-                self.process_word()
         except AttributeError:
             pass
         return True
 
     def process_word(self):
+        if not self.current_word:  # Skip empty words
+            return
+            
         logging.info(f"Processing word: {self.current_word}")
         logging.info(f"Available shortcuts: {self.shorthand_map}")
         logging.info(f"Is '{self.current_word.lower()}' in shortcuts? {self.current_word.lower() in self.shorthand_map}")
@@ -219,23 +232,42 @@ class KeyboardController:
             logging.info(f"Found shorthand match for: {self.current_word}")
             # Delete the shorthand
             logging.info(f"Deleting {len(self.current_word)} characters")
-            for _ in range(len(self.current_word)):
-                pyautogui.press('backspace')
+            pyautogui.press('backspace', presses=len(self.current_word))
             
             # Get the expansion and ensure it's the exact string from the shortcuts
             expansion = self.shorthand_map[self.current_word.lower()]
             logging.info(f"Expanding to: {expansion} using {self.input_language} on {self.layout_manager.layout} keyboard")
             
             if self.input_language == "English" and self.layout_manager.layout == "QWERTZ":
-                # Special handling for apostrophe on QWERTZ keyboard
-                for i, char in enumerate(expansion):
-                    if char == "'":
-                        # For apostrophe on QWERTZ keyboard, press the key right of Ä (usually #39)
-                        pyautogui.press("#")
+                # Map for QWERTZ keyboard when typing English text
+                qwertz_map = {
+                    'y': 'z',
+                    'z': 'y',
+                    'Y': 'Z',
+                    'Z': 'Y',
+                    "'": "'",  # Use direct apostrophe
+                }
+                
+                # Type with QWERTZ keyboard adjustments
+                for char in expansion:
+                    if char in qwertz_map:
+                        mapped_char = qwertz_map[char]
+                        logging.info(f"Mapping {char} to {mapped_char} for QWERTZ keyboard")
+                        if char.isupper():
+                            pyautogui.keyDown('shift')
+                            pyautogui.press(mapped_char.lower())
+                            pyautogui.keyUp('shift')
+                        else:
+                            pyautogui.press(mapped_char)
                     elif char == "I":
-                        # For capital I, use shift + i
+                        # Special handling for capital I
                         pyautogui.keyDown('shift')
                         pyautogui.press('i')
+                        pyautogui.keyUp('shift')
+                    elif char == "'":
+                        # Special handling for apostrophe on German keyboard
+                        pyautogui.keyDown('shift')
+                        pyautogui.press('#')  # The key that produces apostrophe on German keyboard
                         pyautogui.keyUp('shift')
                     else:
                         pyautogui.write(char)
@@ -243,10 +275,8 @@ class KeyboardController:
                     logging.info(f"Typed character: {char}")
             else:
                 # Normal typing for matching language and keyboard
-                for char in expansion:
-                    pyautogui.write(char)
-                    pyautogui.sleep(0.02)
-                    logging.info(f"Typed character: {char}")
+                pyautogui.write(expansion)
+                logging.info(f"Typed expansion: {expansion}")
         else:
             logging.info(f"No expansion found for: {self.current_word}")
 
