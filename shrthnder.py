@@ -244,8 +244,7 @@ class KeyboardController:
                     'y': 'z',
                     'z': 'y',
                     'Y': 'Z',
-                    'Z': 'Y',
-                    "'": "'",  # Use direct apostrophe
+                    'Z': 'Y'
                 }
                 
                 # Type with QWERTZ keyboard adjustments
@@ -253,12 +252,7 @@ class KeyboardController:
                     if char in qwertz_map:
                         mapped_char = qwertz_map[char]
                         logging.info(f"Mapping {char} to {mapped_char} for QWERTZ keyboard")
-                        if char.isupper():
-                            pyautogui.keyDown('shift')
-                            pyautogui.press(mapped_char.lower())
-                            pyautogui.keyUp('shift')
-                        else:
-                            pyautogui.press(mapped_char)
+                        pyautogui.write(mapped_char)
                     elif char == "I":
                         # Special handling for capital I
                         pyautogui.keyDown('shift')
@@ -267,7 +261,7 @@ class KeyboardController:
                     elif char == "'":
                         # Special handling for apostrophe on German keyboard
                         pyautogui.keyDown('shift')
-                        pyautogui.press('#')  # The key that produces apostrophe on German keyboard
+                        pyautogui.press('#')
                         pyautogui.keyUp('shift')
                     else:
                         pyautogui.write(char)
