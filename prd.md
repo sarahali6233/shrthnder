@@ -28,7 +28,7 @@ Focus on creating a lightweight MVP with the following core functionalities:
    - Allow users to configure shorthand rules and settings through an intuitive interface.
 
 ---
-Btw 
+Btw idk omw	
 ## **Functional Requirements**
 
 ### **1. Global Keyboard Event Listener**

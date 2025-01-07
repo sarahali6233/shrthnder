@@ -1,0 +1,40 @@
+{
+    "Default": {
+        "btw": "by the way",
+        "idk": "I don't know",
+        "omw": "on my way",
+        "hl": "hello"
+    },
+    "Developer": {
+        "cls": "class",
+        "fn": "function",
+        "ret": "return",
+        "imp": "import",
+        "pr": "print"
+    },
+    "Medical": {
+        "pt": "patient",
+        "rx": "prescription",
+        "dx": "diagnosis",
+        "tx": "treatment",
+        "hx": "history"
+    },
+    "Legal": {
+        "def": "defendant",
+        "plt": "plaintiff",
+        "jdg": "judgment",
+        "crt": "court",
+        "att": "attorney"
+    },
+    "Student": {
+        "asap": "as soon as possible",
+        "tba": "to be announced",
+        "tbd": "to be determined",
+        "eg": "for example",
+        "ie": "that is"
+    },
+    "PROFILE1": {
+        "wknd": "weekend",
+        "ftgrph": "photograph"
+    }
+}
