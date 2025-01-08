@@ -1,5 +1,15 @@
 pynput
 PyQt5
-pyobjc-framework-Quartz; sys_platform == 'darwin'
 pyautogui
 keyboard
+
+# macOS specific dependencies
+pyobjc-framework-Quartz; sys_platform == 'darwin'
+pyobjc-framework-AppKit; sys_platform == 'darwin'
+
+# Windows specific dependencies
+pywin32; sys_platform == 'win32'
+
+# Linux specific dependencies
+python-xlib; sys_platform == 'linux'
+python-xlib-dev; sys_platform == 'linux'

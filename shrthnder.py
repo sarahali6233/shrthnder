@@ -10,30 +10,10 @@ import locale
 import platform
 import time
 from pynput.keyboard import Key
-from Foundation import NSString
-from AppKit import NSApplication, NSEvent, NSKeyUp
-import Quartz
+from platform_specific import TextInputFactory
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-
-class MacTextInput:
-    @staticmethod
-    def delete_chars(count):
-        for _ in range(count):
-            event = Quartz.CGEventCreateKeyboardEvent(None, 0x33, True)
-            Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
-            Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateKeyboardEvent(None, 0x33, False))
-        
-    @staticmethod
-    def insert_text(text):
-        # Create keyboard events for each character
-        for char in text:
-            # Regular character input
-            event = Quartz.CGEventCreateKeyboardEvent(None, 0, True)
-            Quartz.CGEventKeyboardSetUnicodeString(event, len(char), chr(ord(char)))
-            Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
-            Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateKeyboardEvent(None, 0, False))
 
 class KeyboardLayoutManager:
     def __init__(self):
@@ -79,6 +59,7 @@ class KeyboardController:
         self.shorthand_map = self.shortcuts
         self.profiles = self.load_default_shortcuts()
         self.keyboard_listener = None
+        self.text_input = TextInputFactory.get_text_input()
 
     def setup_logger(self):
         logger = logging.getLogger('shrthnder')
@@ -198,10 +179,10 @@ class KeyboardController:
                 expansion = modified_text
 
             # Delete the original text plus one extra character to prevent duplication
-            MacTextInput.delete_chars(len(self.current_word) + 1)
+            self.text_input.delete_chars(len(self.current_word) + 1)
             
             # Insert the expanded text with a space
-            MacTextInput.insert_text(expansion + " ")
+            self.text_input.insert_text(expansion + " ")
                 
         except Exception as e:
             self.logger.error(f"Error in check_and_expand: {e}")
