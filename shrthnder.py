@@ -11,29 +11,41 @@ import platform
 import time
 from pynput.keyboard import Key
 from platform_specific import TextInputFactory
+from keyboard_layouts import LayoutManager as KbLayoutManager
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 class KeyboardLayoutManager:
     def __init__(self):
-        self.layout = "QWERTZ" if locale.getdefaultlocale()[0].startswith('de') else "QWERTY"
+        self.layout = "qwertz" if not locale.getdefaultlocale()[0].startswith('en') else "qwerty"
         self.logger = logging.getLogger('shrthnder')
+        self.layout_manager = KbLayoutManager(self.layout)
+        # Physical keyboard mapping for common special characters
+        self.physical_to_qwerty = {
+            # German QWERTZ to QWERTY
+            'z': 'y', 'y': 'z', 'ü': '[', 'ä': "'", 'ö': ';', 'ß': ']',
+            # Keep QWERTY mappings as is
+            'q': 'q', 'w': 'w', 'e': 'e', 'r': 'r', 't': 't', 'u': 'u',
+            'i': 'i', 'o': 'o', 'p': 'p', 'a': 'a', 's': 's', 'd': 'd',
+            'f': 'f', 'g': 'g', 'h': 'h', 'j': 'j', 'k': 'k', 'l': 'l',
+            'x': 'x', 'c': 'c', 'v': 'v', 'b': 'b', 'n': 'n', 'm': 'm',
+            ',': ',', '.': '.', '/': '/'
+        }
 
     def get_char(self, key):
         try:
             # Handle special keys
             if hasattr(key, 'char') and key.char:
-                return key.char
-            
-            # Map special keys based on layout
-            if self.layout == "QWERTZ":
-                special_keys = {
-                    'z': 'y',
-                    'y': 'z',
-                }
-                if hasattr(key, 'char') and key.char in special_keys:
-                    return special_keys[key.char]
+                # First map the physical key to its QWERTY position
+                char = key.char.lower()
+                qwerty_pos = self.physical_to_qwerty.get(char, char)
+                
+                # Then transform that position according to the selected layout
+                result = self.layout_manager.transform_text(qwerty_pos)
+                
+                # Preserve original case
+                return result.upper() if key.char.isupper() else result
             
             # Return space for space key
             if key == Key.space:
@@ -48,6 +60,10 @@ class KeyboardLayoutManager:
             self.logger.error(f"Error getting character: {e}")
             return ''
 
+    def transform_text(self, text):
+        """Wrapper method to transform text using the layout manager."""
+        return self.layout_manager.transform_text(text)
+
 class KeyboardController:
     def __init__(self):
         self.logger = self.setup_logger()
@@ -60,6 +76,8 @@ class KeyboardController:
         self.profiles = self.load_default_shortcuts()
         self.keyboard_listener = None
         self.text_input = TextInputFactory.get_text_input()
+        self.last_key_time = 0
+        self.key_cooldown = 0.05  # 50ms cooldown between key presses
 
     def setup_logger(self):
         logger = logging.getLogger('shrthnder')
@@ -129,8 +147,8 @@ class KeyboardController:
         return profiles
 
     def start(self):
-        if self.keyboard_listener:
-            self.keyboard_listener.stop()
+        # Stop any existing listener before starting a new one
+        self.stop()
         self.keyboard_listener = keyboard.Listener(on_press=self.on_press)
         self.keyboard_listener.start()
         self.logger.info(f"Started keyboard listener with {self.layout_manager.layout} layout")
@@ -139,9 +157,16 @@ class KeyboardController:
         if self.keyboard_listener:
             self.keyboard_listener.stop()
             self.keyboard_listener = None
+            self.logger.info("Stopped keyboard listener")
 
     def on_press(self, key):
         try:
+            # Implement key press cooldown to prevent multiple transformations
+            current_time = time.time()
+            if current_time - self.last_key_time < self.key_cooldown:
+                return
+            self.last_key_time = current_time
+
             # If space is pressed, check for expansion
             if key == Key.space:
                 if self.current_word.lower() in self.profiles[self.current_profile]:
@@ -149,12 +174,46 @@ class KeyboardController:
                 self.current_word = ""  # Reset current word
                 return
 
-            # Get character and add to current word if it's alphanumeric
-            if hasattr(key, 'char') and key.char:
-                if key.char.isalpha() or key.char.isdigit():
-                    self.current_word += key.char
-        except AttributeError:
-            pass
+            # Only process character keys
+            if hasattr(key, 'char') and key.char and (key.char.isalpha() or key.char.isdigit()):
+                char = key.char
+                transformed_char = char
+                
+                # Get the current layout
+                layout = self.layout_manager.layout
+                layout_map = self.layout_manager.layout_manager.current_layout
+                
+                # First map the physical key to its QWERTY position
+                qwerty_pos = self.layout_manager.physical_to_qwerty.get(char.lower(), char.lower())
+                
+                # Special handling for QWERTY/QWERTZ y/z swap
+                if layout == "qwerty":
+                    if char.lower() == 'y':
+                        self.text_input.delete_chars(1)
+                        transformed_char = 'z' if char.islower() else 'Z'
+                        self.text_input.insert_text(transformed_char)
+                    elif char.lower() == 'z':
+                        self.text_input.delete_chars(1)
+                        transformed_char = 'y' if char.islower() else 'Y'
+                        self.text_input.insert_text(transformed_char)
+                # For QWERTZ, no transformation needed
+                elif layout == "qwertz":
+                    transformed_char = char
+                # For all other layouts (AdNW, CMOS, Dvorak, etc.)
+                else:
+                    # Get the character that should be typed in this position
+                    transformed = layout_map.get(qwerty_pos, qwerty_pos)
+                    if transformed != char:
+                        self.text_input.delete_chars(1)
+                        transformed_char = transformed if char.islower() else transformed.upper()
+                        self.text_input.insert_text(transformed_char)
+                
+                # Add the character to current word
+                self.current_word += transformed_char
+                self.logger.info(f"Key pressed: {char}, transformed to: {transformed_char} (Layout: {layout})")
+                
+        except Exception as e:
+            self.logger.error(f"Error in on_press: {e}")
 
     def check_and_expand(self):
         if not self.current_word:
@@ -164,25 +223,15 @@ class KeyboardController:
             # Get the expansion
             expansion = self.profiles[self.current_profile].get(self.current_word.lower())
             
-            # Handle QWERTZ mapping if needed
-            if self.layout_manager.layout == "QWERTZ":
-                modified_text = ""
-                for char in expansion:
-                    if char.lower() == 'y':
-                        modified_text += 'z' if char.islower() else 'Z'
-                    elif char.lower() == 'z':
-                        modified_text += 'y' if char.islower() else 'Y'
-                    elif char == "'":
-                        modified_text += "#"  # Use hash key for apostrophe on German keyboard
-                    else:
-                        modified_text += char
-                expansion = modified_text
-
-            # Delete the original text plus one extra character to prevent duplication
-            self.text_input.delete_chars(len(self.current_word) + 1)
-            
-            # Insert the expanded text with a space
-            self.text_input.insert_text(expansion + " ")
+            if expansion:
+                # Transform the expansion based on the current layout
+                transformed_expansion = self.layout_manager.layout_manager.transform_text(expansion)
+                
+                # Delete the original text plus one extra character to prevent duplication
+                self.text_input.delete_chars(len(self.current_word) + 1)
+                
+                # Insert the expanded text with a space
+                self.text_input.insert_text(transformed_expansion + " ")
                 
         except Exception as e:
             self.logger.error(f"Error in check_and_expand: {e}")
@@ -343,10 +392,21 @@ class MainWindow(QMainWindow):
         
         # Language group
         language_group = QVBoxLayout()
-        language_label = QLabel("Input Language:")
+        language_label = QLabel("Keyboard Layout:")
         self.language_combo = QComboBox()
-        self.language_combo.addItems(["English", "German"])
-        self.language_combo.setCurrentText(self.keyboard_controller.input_language)
+        self.language_combo.addItems([
+            "German (QWERTZ)",
+            "English (QWERTY)",
+            "German (AdNW)",
+            "German (CMOS)",
+            "Programming (Dvorak)",
+            "Programming (Colemak)",
+            "Programming (Workman)",
+            "Hamlak"
+        ])
+        # Set default based on current language
+        default_layout = "English (QWERTY)" if self.keyboard_controller.input_language == "English" else "German (QWERTZ)"
+        self.language_combo.setCurrentText(default_layout)
         self.language_combo.currentTextChanged.connect(self.on_language_changed)
         language_group.addWidget(language_label)
         language_group.addWidget(self.language_combo)
@@ -397,9 +457,30 @@ class MainWindow(QMainWindow):
         profiles = self.keyboard_controller.get_profiles()
         self.profile_combo.addItems(profiles)
 
-    def on_language_changed(self, new_language):
-        self.keyboard_controller.input_language = new_language
-        logging.info(f"Input language changed to: {new_language}")
+    def on_language_changed(self, new_layout):
+        # Map layout names to language and layout settings
+        layout_map = {
+            "English (QWERTY)": ("English", "qwerty"),
+            "German (QWERTZ)": ("German", "qwertz"),
+            "German (AdNW)": ("German", "adnw"),
+            "German (CMOS)": ("German", "cmos"),
+            "Programming (Dvorak)": ("English", "programmer_dvorak"),
+            "Programming (Colemak)": ("English", "colemak_mod_dh"),
+            "Programming (Workman)": ("English", "workman"),
+            "Hamlak": ("English", "hamlak")
+        }
+        
+        # Get language and layout from the map
+        language, layout = layout_map.get(new_layout, ("English", "qwerty"))
+        
+        # Update language (for compatibility with existing code)
+        self.keyboard_controller.input_language = language
+        # Update layout
+        self.keyboard_controller.layout_manager.layout = layout
+        # Update layout manager
+        self.keyboard_controller.layout_manager.layout_manager = KbLayoutManager(layout)
+        
+        logging.info(f"Changed to {new_layout} (Language: {language}, Layout: {layout})")
 
     def update_table(self):
         # Get shortcuts from current profile
