@@ -41,6 +41,7 @@ class LayoutManager:
     def available_layouts():
         """Get a list of all available layout names."""
         return [
+            'qwerty',
             'qwertz',
             'adnw',
             'cmos',
