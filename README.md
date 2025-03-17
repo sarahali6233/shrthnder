@@ -81,6 +81,14 @@ python3 shrthnder.py
 python shrthnder.py
 ```
 
+### Windows Installation (Executable)
+
+1. Download the latest release from the [Releases page](https://github.com/sarahali6233/shrthnder/releases)
+2. Extract the ZIP file to your desired location
+3. Run `run_shrthnder.bat` to start the application with proper permissions
+
+Note: When running for the first time, Windows may show a security warning. Click "More info" and then "Run anyway" to proceed.
+
 ### Linux Setup
 
 1. Install Required System Dependencies:

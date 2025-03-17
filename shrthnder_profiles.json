@@ -17,7 +17,8 @@
         "rx": "prescription",
         "dx": "diagnosis",
         "tx": "treatment",
-        "hx": "history"
+        "hx": "history",
+        "med": "medicine"
     },
     "Legal": {
         "def": "defendant",

@@ -18,7 +18,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 class KeyboardLayoutManager:
     def __init__(self):
-        self.layout = "qwertz" if not locale.getdefaultlocale()[0].startswith('en') else "qwerty"
+        system_locale = locale.getdefaultlocale()[0]
+        self.layout = "qwertz" if system_locale and system_locale.startswith('de') else "qwerty"
         self.logger = logging.getLogger('shrthnder')
         self.layout_manager = KbLayoutManager(self.layout)
         # Physical keyboard mapping for common special characters
@@ -30,7 +31,10 @@ class KeyboardLayoutManager:
             'i': 'i', 'o': 'o', 'p': 'p', 'a': 'a', 's': 's', 'd': 'd',
             'f': 'f', 'g': 'g', 'h': 'h', 'j': 'j', 'k': 'k', 'l': 'l',
             'x': 'x', 'c': 'c', 'v': 'v', 'b': 'b', 'n': 'n', 'm': 'm',
-            ',': ',', '.': '.', '/': '/'
+            # Special characters that need mapping
+            ',': ',', '.': '.', '/': '/', '-': '/',
+            # Shifted special characters
+            ':': '.', '_': '/', ';': ',', '<': ',', '>': '.'
         }
 
     def get_char(self, key):
@@ -175,7 +179,7 @@ class KeyboardController:
                 return
 
             # Only process character keys
-            if hasattr(key, 'char') and key.char and (key.char.isalpha() or key.char.isdigit()):
+            if hasattr(key, 'char') and key.char:
                 char = key.char
                 transformed_char = char
                 
@@ -205,7 +209,8 @@ class KeyboardController:
                     transformed = layout_map.get(qwerty_pos, qwerty_pos)
                     if transformed != char:
                         self.text_input.delete_chars(1)
-                        transformed_char = transformed if char.islower() else transformed.upper()
+                        # Respect original case for all characters
+                        transformed_char = transformed.upper() if char.isupper() else transformed.lower()
                         self.text_input.insert_text(transformed_char)
                 
                 # Add the character to current word
