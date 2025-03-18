@@ -3,12 +3,22 @@ from .layouts import KeyboardLayouts
 class LayoutManager:
     def __init__(self, layout_name='qwertz'):
         """Initialize the layout manager with a specific layout."""
+        if not isinstance(layout_name, str):
+            raise TypeError("Layout name must be a string")
+            
+        layout_name = layout_name.lower().strip()
+        if layout_name not in self.available_layouts():
+            raise ValueError(f"Layout '{layout_name}' not found. Available layouts: {', '.join(self.available_layouts())}")
+            
         self.current_layout = KeyboardLayouts.get_layout(layout_name)
         if not self.current_layout:
-            raise ValueError(f"Layout '{layout_name}' not found")
+            raise ValueError(f"Failed to load layout '{layout_name}'")
         
     def transform_text(self, text):
         """Transform text from QWERTY to the current layout."""
+        if not isinstance(text, str):
+            raise TypeError("Input text must be a string")
+            
         if not self.current_layout:
             return text
             

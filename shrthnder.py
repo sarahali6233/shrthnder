@@ -1,6 +1,6 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QPushButton, QWidget, QTableWidget, QTableWidgetItem, QLabel, QLineEdit, QHBoxLayout, QComboBox, QInputDialog, QMessageBox, QFileDialog, QTimer
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QPushButton, QWidget, QTableWidget, QTableWidgetItem, QLabel, QLineEdit, QHBoxLayout, QComboBox, QInputDialog, QMessageBox, QFileDialog, QCheckBox, QGroupBox
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from pynput import keyboard
 import pyautogui
 import json
@@ -9,11 +9,16 @@ import logging
 import locale
 import platform
 import time
+from dotenv import load_dotenv
 from pynput.keyboard import Key
 from platform_specific import TextInputFactory
-from platform_specific.window_detection_factory import WindowDetectionFactory
 from keyboard_layouts import LayoutManager as KbLayoutManager
-from datetime import datetime
+import requests
+from PyQt5.QtGui import QIcon
+from ai_expansion_service import start_api_server_thread
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -77,66 +82,30 @@ class KeyboardController:
         self.layout_manager = KeyboardLayoutManager()
         self.input_language = "English"  # Default input language
         self.current_profile = "Default"
-        self.shortcuts = self.load_default_shortcuts()
-        self.shorthand_map = self.shortcuts
-        self.profiles = self.load_default_shortcuts()
+        self.profiles = self.load_default_shortcuts()  # Load profiles once
+        self.expansion_triggers = {
+            Key.space: ' ',    # Space
+        }
+        self.punctuation_triggers = '.,?!;:'  # These will be handled separately
         self.keyboard_listener = None
         self.text_input = TextInputFactory.get_text_input()
-        self.window_detection = WindowDetectionFactory.get_window_detection()
         self.last_key_time = 0
-        self.key_cooldown = 0.05  # 50ms cooldown between key presses
-        self.current_app = "unknown"
-        self.app_categories = {
-            "code_editors": ["Visual Studio Code", "PyCharm", "Sublime Text", "Atom"],
-            "browsers": ["Google Chrome", "Safari", "Firefox", "Microsoft Edge"],
-            "word_processors": ["Microsoft Word", "Pages", "LibreOffice"],
-            "terminals": ["Terminal", "iTerm", "Command Prompt"]
-        }
+        self.key_cooldown = 0.01  # Reduced from 0.05 to 0.01 for faster response
+        self.pending_keys = []  # Queue for pending key events
+        self.max_queue_size = 100  # Maximum number of pending keys to prevent memory issues
+        self.queue_warning_threshold = 80  # Warn when queue reaches 80% capacity
+        self.use_ai_expansion = False  # Flag to control AI expansion
 
     def setup_logger(self):
         logger = logging.getLogger('shrthnder')
         logger.setLevel(logging.INFO)
+        # Remove existing handlers to prevent duplicates
+        logger.handlers = []
         handler = logging.StreamHandler()
         formatter = logging.Formatter('%(asctime)s - %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         return logger
-
-    def get_current_app_category(self):
-        """Get the category of the currently active application."""
-        try:
-            self.current_app = self.window_detection.get_active_window()
-            for category, apps in self.app_categories.items():
-                if self.current_app in apps:
-                    return category
-            return "global"
-        except Exception as e:
-            self.logger.error(f"Error getting app category: {e}")
-            return "global"
-
-    def process_dynamic_content(self, expansion):
-        """Process any dynamic content in the expansion string."""
-        try:
-            # Replace date/time placeholders
-            if "{date}" in expansion:
-                expansion = expansion.replace("{date}", datetime.now().strftime("%Y-%m-%d"))
-            if "{time}" in expansion:
-                expansion = expansion.replace("{time}", datetime.now().strftime("%H:%M"))
-            
-            # Get current app category for context-specific processing
-            app_category = self.get_current_app_category()
-            
-            # Add context-specific processing
-            if app_category == "code_editors":
-                if "{fn}" in expansion:
-                    expansion = expansion.replace("{fn}", "function")
-                if "{cl}" in expansion:
-                    expansion = expansion.replace("{cl}", "class")
-            
-            return expansion
-        except Exception as e:
-            self.logger.error(f"Error processing dynamic content: {e}")
-            return expansion
 
     def load_default_shortcuts(self):
         # Try to load from file first
@@ -150,36 +119,42 @@ class KeyboardController:
             except Exception as e:
                 self.logger.error(f"Error loading profiles from file: {e}")
 
-        # Default profiles with context-aware shortcuts
+        # Default profiles if file doesn't exist or has error
         profiles = {
             "Default": {
-                "global": {
-                    "btw": "by the way",
-                    "idk": "I don't know",
-                    "omw": "on my way",
-                    "date": "{date}",
-                    "time": "{time}"
-                },
-                "code_editors": {
-                    "fn": "function {name}() {\n    \n}",
-                    "cl": "class {name} {\n    constructor() {\n        \n    }\n}",
-                    "imp": "import {module} from '{path}'",
-                    "log": "console.log({message})",
-                    "pr": "print({message})"
-                },
-                "browsers": {
-                    "email": "user@example.com",
-                    "gh": "https://github.com/",
-                    "so": "https://stackoverflow.com/"
-                },
-                "word_processors": {
-                    "heading1": "# Heading 1",
-                    "cite": "[Citation needed]",
-                    "draft": "DRAFT - {date}"
-                }
+                "btw": "by the way",
+                "idk": "I don't know",
+                "omw": "on my way"
+            },
+            "Developer": {
+                "cls": "class",
+                "fn": "function",
+                "ret": "return",
+                "imp": "import",
+                "pr": "print"
+            },
+            "Medical": {
+                "pt": "patient",
+                "rx": "prescription",
+                "dx": "diagnosis",
+                "tx": "treatment",
+                "hx": "history"
+            },
+            "Legal": {
+                "def": "defendant",
+                "plt": "plaintiff",
+                "jdg": "judgment",
+                "crt": "court",
+                "att": "attorney"
+            },
+            "Student": {
+                "asap": "as soon as possible",
+                "tba": "to be announced",
+                "tbd": "to be determined",
+                "eg": "for example",
+                "ie": "that is"
             }
         }
-        
         # Save default profiles to file
         try:
             with open(profiles_file, 'w') as f:
@@ -197,24 +172,57 @@ class KeyboardController:
         self.keyboard_listener.start()
         self.logger.info(f"Started keyboard listener with {self.layout_manager.layout} layout")
 
+    def _check_queue_size(self):
+        """Monitor queue size and log warnings if approaching capacity."""
+        queue_size = len(self.pending_keys)
+        if queue_size >= self.queue_warning_threshold:
+            self.logger.warning(f"Key queue at {queue_size}/{self.max_queue_size} capacity")
+
     def stop(self):
-        if self.keyboard_listener:
-            self.keyboard_listener.stop()
-            self.keyboard_listener = None
-            self.logger.info("Stopped keyboard listener")
+        """Stop the keyboard listener and clean up resources."""
+        try:
+            if self.keyboard_listener:
+                self.keyboard_listener.stop()
+                self.keyboard_listener = None
+                # Clear any pending keys
+                self.pending_keys = []
+                self.last_key_time = 0
+                self.logger.info("Stopped keyboard listener and cleaned up resources")
+        except Exception as e:
+            self.logger.error(f"Error during keyboard listener cleanup: {e}")
 
     def on_press(self, key):
         try:
-            # Implement key press cooldown to prevent multiple transformations
+            # Add key to pending queue if not full
+            if len(self.pending_keys) < self.max_queue_size:
+                self.pending_keys.append(key)
+                self._check_queue_size()  # Monitor queue size
+            else:
+                self.logger.warning("Key queue full, dropping oldest key")
+                self.pending_keys.pop(0)  # Remove oldest key
+                self.pending_keys.append(key)  # Add new key
+            
+            # Process all pending keys
             current_time = time.time()
-            if current_time - self.last_key_time < self.key_cooldown:
-                return
-            self.last_key_time = current_time
+            if current_time - self.last_key_time >= self.key_cooldown:
+                while self.pending_keys:
+                    next_key = self.pending_keys.pop(0)
+                    self._process_key(next_key)
+                self.last_key_time = current_time
+                
+        except Exception as e:
+            self.logger.error(f"Error in on_press: {e}")
+            # Clear queue on error to prevent stuck state
+            self.pending_keys = []
+            self.last_key_time = 0  # Reset timer on error
 
-            # If space is pressed, check for expansion
-            if key == Key.space:
+    def _process_key(self, key):
+        try:
+            # Check for expansion triggers
+            if key == Key.space or (hasattr(key, 'char') and key.char in self.punctuation_triggers):
+                trigger_char = ' ' if key == Key.space else key.char
                 if self.current_word.lower() in self.profiles[self.current_profile]:
-                    self.check_and_expand()
+                    self.check_and_expand(trigger_char)
                 self.current_word = ""  # Reset current word
                 return
 
@@ -223,86 +231,105 @@ class KeyboardController:
                 char = key.char
                 transformed_char = char
                 
-                # Get the current layout
-                layout = self.layout_manager.layout
-                layout_map = self.layout_manager.layout_manager.current_layout
-                
-                # First map the physical key to its QWERTY position
-                qwerty_pos = self.layout_manager.physical_to_qwerty.get(char.lower(), char.lower())
-                
-                # Special handling for QWERTY/QWERTZ y/z swap
-                if layout == "qwerty":
-                    if char.lower() == 'y':
-                        self.text_input.delete_chars(1)
-                        transformed_char = 'z' if char.islower() else 'Z'
-                        self.text_input.insert_text(transformed_char)
-                    elif char.lower() == 'z':
-                        self.text_input.delete_chars(1)
-                        transformed_char = 'y' if char.islower() else 'Y'
-                        self.text_input.insert_text(transformed_char)
-                # For QWERTZ, no transformation needed
-                elif layout == "qwertz":
-                    transformed_char = char
-                # For all other layouts (AdNW, CMOS, Dvorak, etc.)
-                else:
-                    # Get the character that should be typed in this position
-                    transformed = layout_map.get(qwerty_pos, qwerty_pos)
-                    if transformed != char:
-                        self.text_input.delete_chars(1)
-                        # Respect original case for all characters
-                        transformed_char = transformed.upper() if char.isupper() else transformed.lower()
-                        self.text_input.insert_text(transformed_char)
-                
-                # Add the character to current word
-                self.current_word += transformed_char
-                self.logger.info(f"Key pressed: {char}, transformed to: {transformed_char} (Layout: {layout})")
+                try:
+                    # Get the current layout
+                    layout = self.layout_manager.layout
+                    layout_map = self.layout_manager.layout_manager.current_layout
+                    
+                    # First map the physical key to its QWERTY position
+                    qwerty_pos = self.layout_manager.physical_to_qwerty.get(char.lower(), char.lower())
+                    
+                    # Special handling for QWERTY/QWERTZ y/z swap
+                    if layout == "qwerty":
+                        if char.lower() == 'y':
+                            self.text_input.delete_chars(1)
+                            transformed_char = 'z' if char.islower() else 'Z'
+                            self.text_input.insert_text(transformed_char)
+                        elif char.lower() == 'z':
+                            self.text_input.delete_chars(1)
+                            transformed_char = 'y' if char.islower() else 'Y'
+                            self.text_input.insert_text(transformed_char)
+                    # For QWERTZ, no transformation needed
+                    elif layout == "qwertz":
+                        transformed_char = char
+                    # For all other layouts (AdNW, CMOS, Dvorak, etc.)
+                    else:
+                        # Get the character that should be typed in this position
+                        transformed = layout_map.get(qwerty_pos, qwerty_pos)
+                        if transformed != char:
+                            self.text_input.delete_chars(1)
+                            # Respect original case for all characters
+                            transformed_char = transformed.upper() if char.isupper() else transformed.lower()
+                            self.text_input.insert_text(transformed_char)
+                    
+                    # Add the character to current word
+                    self.current_word += transformed_char
+                    self.logger.info(f"Key pressed: {char}, transformed to: {transformed_char} (Layout: {layout})")
+                except Exception as e:
+                    # If transformation fails, use original character
+                    self.logger.error(f"Error transforming key {char}: {e}")
+                    self.current_word += char
                 
         except Exception as e:
-            self.logger.error(f"Error in on_press: {e}")
+            self.logger.error(f"Error processing key: {e}")
+            # Try to preserve the key if possible
+            if hasattr(key, 'char') and key.char:
+                self.current_word += key.char
 
-    def check_and_expand(self):
+    def check_and_expand(self, trigger_char=' '):
         if not self.current_word:
             return
 
         try:
-            # Get current app category
-            app_category = self.get_current_app_category()
+            # Get the expansion from current profile's shortcuts
+            expansion = self.profiles[self.current_profile].get(self.current_word.lower())
             
-            # Check app-specific shortcuts first
-            expansion = None
-            if app_category in self.profiles[self.current_profile]:
-                expansion = self.profiles[self.current_profile][app_category].get(self.current_word.lower())
-            
-            # If no app-specific shortcut found, try global shortcuts
-            if not expansion and "global" in self.profiles[self.current_profile]:
-                expansion = self.profiles[self.current_profile]["global"].get(self.current_word.lower())
+            # If no expansion found and AI expansion is enabled, try AI expansion
+            if not expansion and self.use_ai_expansion:
+                expansion = self.get_ai_expansion(self.current_word)
             
             if expansion:
-                # Process any dynamic content
-                expansion = self.process_dynamic_content(expansion)
+                # Transform the expansion based on the current layout
+                transformed_expansion = self.layout_manager.layout_manager.transform_text(expansion)
                 
-                # Transform based on current layout
-                transformed_expansion = self.layout_manager.transform_text(expansion)
-                
-                # Delete the original text plus space
+                # Delete the original text plus one extra character to prevent duplication
                 self.text_input.delete_chars(len(self.current_word) + 1)
                 
-                # Insert the expanded text
-                self.text_input.insert_text(transformed_expansion + " ")
-                
-                self.logger.info(f"Expanded '{self.current_word}' to '{expansion}' in {app_category}")
+                # Insert the expanded text with the trigger character
+                self.text_input.insert_text(transformed_expansion + trigger_char)
                 
         except Exception as e:
             self.logger.error(f"Error in check_and_expand: {e}")
             return
+            
+    def get_ai_expansion(self, text):
+        """Use the AI service to expand text."""
+        try:
+            response = requests.post(
+                "http://127.0.0.1:8000/expand",
+                json={"context": self.current_profile, "query": text},
+                timeout=5
+            )
+            if response.status_code == 200:
+                result = response.json()
+                self.logger.info(f"AI expanded '{text}' to '{result['expanded_text']}'")
+                return result["expanded_text"]
+            else:
+                self.logger.error(f"AI expansion failed: {response.text}")
+                return None
+        except Exception as e:
+            self.logger.error(f"Error calling AI expansion service: {e}")
+            return None
+            
+    def set_ai_expansion(self, enabled):
+        """Enable or disable AI expansion."""
+        self.use_ai_expansion = enabled
+        self.logger.info(f"AI expansion {'enabled' if enabled else 'disabled'}")
 
     def save_profiles(self):
         """Save all profiles to file."""
         try:
             self.logger.info("Saving profiles")
-            # Update the current profile's shortcuts
-            self.shortcuts = self.profiles[self.current_profile]
-            self.shorthand_map = self.shortcuts
             
             # Save to file
             profiles_file = 'shrthnder_profiles.json'
@@ -317,8 +344,6 @@ class KeyboardController:
         if profile_name.lower() not in [p.lower() for p in self.profiles.keys()]:
             self.profiles[profile_name] = {}
             self.current_profile = profile_name
-            self.shortcuts = self.profiles[profile_name]
-            self.shorthand_map = self.profiles[profile_name]  # Fix: use profiles directly
             self.save_profiles()
             self.logger.info(f"Created new profile: {profile_name}")
 
@@ -337,19 +362,16 @@ class KeyboardController:
     def set_profile(self, profile_name):
         if profile_name in self.profiles:
             self.current_profile = profile_name
-            self.shortcuts = self.profiles[profile_name]
-            self.shorthand_map = self.profiles[profile_name]  # Fix: use profiles directly
             self.logger.info(f"Switched to profile: {profile_name}")
 
     def get_profiles(self):
+        """Get list of all profile names."""
         return list(self.profiles.keys())
 
     def delete_profile(self, profile_name):
         if profile_name in self.profiles:
             del self.profiles[profile_name]
             self.current_profile = "Default"
-            self.shortcuts = self.profiles[self.current_profile]
-            self.shorthand_map = self.shortcuts
             self.save_profiles()
             self.logger.info(f"Deleted profile: {profile_name}")
 
@@ -357,31 +379,11 @@ class KeyboardController:
         self.input_language = language
         self.logger.info(f"Set input language to: {language}")
 
-    def add_shorthand(self):
-        shorthand = self.shorthand_input.text().strip()
-        expansion = self.expansion_input.text().strip()
-        
-        if shorthand and expansion:
-            # Add to current profile
-            current_profile = self.keyboard_controller.current_profile
-            self.keyboard_controller.profiles[current_profile][shorthand] = expansion
-            self.keyboard_controller.save_profiles()
-            # Update the controller's shorthand map
-            self.keyboard_controller.shorthand_map = self.keyboard_controller.profiles[current_profile]
-            self.update_table()
-            self.shorthand_input.clear()
-            self.expansion_input.clear()
-
 class MainWindow(QMainWindow):
     def __init__(self, keyboard_controller):
         super().__init__()
         self.keyboard_controller = keyboard_controller
         self.init_ui()
-        
-        # Start context update timer
-        self.context_timer = QTimer()
-        self.context_timer.timeout.connect(self.update_context_indicator)
-        self.context_timer.start(1000)  # Update every second
 
     def init_ui(self):
         self.setWindowTitle("Shrthnder - Typing Efficiency Tool")
@@ -476,36 +478,26 @@ class MainWindow(QMainWindow):
         language_group.addWidget(self.language_combo)
         settings_layout.addLayout(language_group)
         
-        # Add context selector
-        context_group = QVBoxLayout()
-        context_label = QLabel("Context:")
-        self.context_combo = QComboBox()
-        self.context_combo.addItems(["global"] + list(self.keyboard_controller.app_categories.keys()))
-        self.context_combo.currentTextChanged.connect(self.on_context_changed)
+        # Add AI expansion option
+        ai_group = QVBoxLayout()
+        ai_label = QLabel("AI Features:")
+        self.ai_expansion_checkbox = QCheckBox("Use AI for unknown shortcuts")
+        self.ai_expansion_checkbox.setChecked(self.keyboard_controller.use_ai_expansion)
+        self.ai_expansion_checkbox.stateChanged.connect(self.on_ai_expansion_toggled)
+        ai_group.addWidget(ai_label)
+        ai_group.addWidget(self.ai_expansion_checkbox)
+        settings_layout.addLayout(ai_group)
         
-        # Add context indicator
-        self.context_indicator = QLabel("Current Context: global")
-        self.context_indicator.setStyleSheet("color: #666; font-style: italic;")
+        layout.addLayout(settings_layout)
         
-        context_group.addWidget(context_label)
-        context_group.addWidget(self.context_combo)
-        context_group.addWidget(self.context_indicator)
-        settings_layout.addLayout(context_group)
-        
-        # Update shorthand section
+        # Add shorthand section
         shorthand_layout = QVBoxLayout()
         shorthand_label = QLabel("Add Custom Shorthand:")
         shorthand_label.setStyleSheet("font-weight: bold; margin-top: 15px;")
-        
         self.shorthand_input = QLineEdit()
         self.shorthand_input.setPlaceholderText("Enter shorthand (e.g., btw)")
-        
         self.expansion_input = QLineEdit()
         self.expansion_input.setPlaceholderText("Enter expansion (e.g., by the way)")
-        
-        # Add dynamic content helper
-        dynamic_helper = QLabel("Available placeholders: {date}, {time}, {name}, {message}, {module}, {path}")
-        dynamic_helper.setStyleSheet("color: #666; font-size: 12px;")
         
         add_button = QPushButton("Add Shorthand")
         add_button.clicked.connect(self.add_shorthand)
@@ -513,7 +505,6 @@ class MainWindow(QMainWindow):
         shorthand_layout.addWidget(shorthand_label)
         shorthand_layout.addWidget(self.shorthand_input)
         shorthand_layout.addWidget(self.expansion_input)
-        shorthand_layout.addWidget(dynamic_helper)
         shorthand_layout.addWidget(add_button)
         layout.addLayout(shorthand_layout)
         
@@ -522,8 +513,8 @@ class MainWindow(QMainWindow):
         table_label.setStyleSheet("font-weight: bold; margin-top: 15px;")
         layout.addWidget(table_label)
         self.table = QTableWidget()
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["Context", "Shorthand", "Expansion"])
+        self.table.setColumnCount(2)
+        self.table.setHorizontalHeaderLabels(["Shorthand", "Expansion"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.update_table()
         layout.addWidget(self.table)
@@ -555,86 +546,106 @@ class MainWindow(QMainWindow):
             "Hamlak": ("English", "hamlak")
         }
         
-        # Get language and layout from the map
-        language, layout = layout_map.get(new_layout, ("English", "qwerty"))
-        
-        # Update language (for compatibility with existing code)
-        self.keyboard_controller.input_language = language
-        # Update layout
-        self.keyboard_controller.layout_manager.layout = layout
-        # Update layout manager
-        self.keyboard_controller.layout_manager.layout_manager = KbLayoutManager(layout)
-        
-        logging.info(f"Changed to {new_layout} (Language: {language}, Layout: {layout})")
+        try:
+            # Clear current word buffer when changing layouts
+            self.keyboard_controller.current_word = ""
+            
+            # Get language and layout from the map
+            language, layout = layout_map.get(new_layout)
+            if not layout:
+                raise ValueError(f"Unsupported layout: {new_layout}")
+            
+            # Update language (for compatibility with existing code)
+            self.keyboard_controller.input_language = language
+            # Update layout
+            self.keyboard_controller.layout_manager.layout = layout
+            # Update layout manager
+            self.keyboard_controller.layout_manager.layout_manager = KbLayoutManager(layout)
+            
+            logging.info(f"Changed to {new_layout} (Language: {language}, Layout: {layout})")
+        except Exception as e:
+            logging.error(f"Error changing layout: {e}")
+            QMessageBox.warning(self, "Layout Change Error", 
+                              f"Failed to change layout: {str(e)}")
+            # Revert to default layout
+            self.language_combo.setCurrentText("English (QWERTY)")
 
     def update_table(self):
-        """Update the shortcuts table with context-aware information."""
-        current_profile = self.keyboard_controller.current_profile
-        selected_context = self.context_combo.currentText()
-        
-        # Get shortcuts for the current profile
-        shortcuts = []
-        profile_data = self.keyboard_controller.profiles[current_profile]
-        
-        if selected_context == "global":
-            # Show shortcuts from all contexts
-            for context, context_shortcuts in profile_data.items():
-                for shorthand, expansion in context_shortcuts.items():
-                    shortcuts.append((context, shorthand, expansion))
-        else:
-            # Show only shortcuts for the selected context
-            if selected_context in profile_data:
-                context_shortcuts = profile_data[selected_context]
-                for shorthand, expansion in context_shortcuts.items():
-                    shortcuts.append((selected_context, shorthand, expansion))
-        
-        # Update table
+        # Get shortcuts from current profile
+        shortcuts = self.keyboard_controller.profiles[self.keyboard_controller.current_profile]
         self.table.setRowCount(len(shortcuts))
-        for i, (context, shorthand, expansion) in enumerate(shortcuts):
-            self.table.setItem(i, 0, QTableWidgetItem(context))
-            self.table.setItem(i, 1, QTableWidgetItem(shorthand))
-            self.table.setItem(i, 2, QTableWidgetItem(expansion))
-        
+        for i, (shorthand, expansion) in enumerate(shortcuts.items()):
+            self.table.setItem(i, 0, QTableWidgetItem(shorthand))
+            self.table.setItem(i, 1, QTableWidgetItem(expansion))
         # Resize columns to content
         self.table.resizeColumnsToContents()
 
     def add_shorthand(self):
-        """Add a new shorthand with context awareness."""
         shorthand = self.shorthand_input.text().strip()
         expansion = self.expansion_input.text().strip()
-        context = self.context_combo.currentText()
         
-        if shorthand and expansion:
-            # Add to current profile under the selected context
+        try:
+            if not shorthand:
+                QMessageBox.warning(self, "Invalid Input", 
+                                  "Please enter a shorthand.")
+                return
+                
+            if not expansion:
+                QMessageBox.warning(self, "Invalid Input", 
+                                  "Please enter an expansion.")
+                return
+            
+            # Check if shorthand already exists
             current_profile = self.keyboard_controller.current_profile
+            if shorthand in self.keyboard_controller.profiles[current_profile]:
+                reply = QMessageBox.question(self, "Shorthand Exists",
+                    f"The shorthand '{shorthand}' already exists. Do you want to replace it?",
+                    QMessageBox.Yes | QMessageBox.No)
+                
+                if reply == QMessageBox.No:
+                    return
             
-            # Initialize context dictionary if it doesn't exist
-            if context not in self.keyboard_controller.profiles[current_profile]:
-                self.keyboard_controller.profiles[current_profile][context] = {}
-            
-            # Add the shorthand
-            self.keyboard_controller.profiles[current_profile][context][shorthand] = expansion
+            # Add to current profile
+            self.keyboard_controller.profiles[current_profile][shorthand] = expansion
             self.keyboard_controller.save_profiles()
-            
-            # Update the table
+            # Update the table to show the new shorthand
             self.update_table()
-            
-            # Clear input fields
             self.shorthand_input.clear()
             self.expansion_input.clear()
+            
+            # Show success message
+            self.status_label.setText(f"Added shorthand: {shorthand}")
+            self.status_label.setStyleSheet("font-weight: bold; color: #4CAF50;")
+            
+        except Exception as e:
+            logging.error(f"Error adding shorthand: {e}")
+            QMessageBox.warning(self, "Error", 
+                              f"Failed to add shorthand: {str(e)}")
 
-    def update_context_indicator(self):
-        """Update the context indicator with the current application context."""
-        current_context = self.keyboard_controller.get_current_app_category()
-        current_app = self.keyboard_controller.current_app
-        self.context_indicator.setText(f"Current Context: {current_context} ({current_app})")
-
-    def on_context_changed(self, context):
-        """Handle context selection change."""
-        self.update_table()
+    def on_ai_expansion_toggled(self, state):
+        """Handle AI expansion toggle."""
+        enabled = state == Qt.Checked
+        
+        if enabled:
+            # Check if API key is set
+            if not os.getenv('ANTHROPIC_API_KEY'):
+                QMessageBox.warning(self, "API Key Missing", 
+                                  "The Anthropic API key is not set. AI expansion will not work.\n\n"
+                                  "Please add your API key to a .env file or set the ANTHROPIC_API_KEY environment variable.")
+                self.ai_expansion_checkbox.setChecked(False)
+                return
+                
+            QMessageBox.information(self, "AI Expansion Enabled", 
+                                  "AI expansion is now enabled. When a shortcut is not found in your profile, "
+                                  "Shrthnder will attempt to expand it using Claude AI.")
+                                  
+        self.keyboard_controller.set_ai_expansion(enabled)
 
 def main():
     try:
+        # Start the AI expansion service
+        api_thread = start_api_server_thread()
+        
         app = QApplication(sys.argv)
         keyboard_controller = KeyboardController()
         window = MainWindow(keyboard_controller)

@@ -3,7 +3,12 @@
         "btw": "by the way",
         "idk": "I don't know",
         "omw": "on my way",
-        "hl": "hello"
+        "hl": "hello",
+        "r": "are",
+        "u": "you",
+        "hru": "how are you",
+        "hw": "how",
+        "wl": "will"
     },
     "Developer": {
         "cls": "class",
@@ -18,7 +23,8 @@
         "dx": "diagnosis",
         "tx": "treatment",
         "hx": "history",
-        "med": "medicine"
+        "med": "medicine",
+        "sx": "symptoms"
     },
     "Legal": {
         "def": "defendant",

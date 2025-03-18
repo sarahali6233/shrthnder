@@ -2,17 +2,20 @@ pynput
 PyQt5
 pyautogui
 keyboard
+fastapi
+uvicorn
+anthropic
+pydantic
+python-dotenv
+requests
 
 # macOS specific dependencies
 pyobjc-framework-Quartz; sys_platform == 'darwin'
 pyobjc-framework-AppKit; sys_platform == 'darwin'
-pyobjc-framework-Cocoa; sys_platform == 'darwin'
 
 # Windows specific dependencies
 pywin32; sys_platform == 'win32'
-psutil; sys_platform == 'win32'
 
 # Linux specific dependencies
 python-xlib; sys_platform == 'linux'
 python-xlib-dev; sys_platform == 'linux'
-psutil; sys_platform == 'linux'

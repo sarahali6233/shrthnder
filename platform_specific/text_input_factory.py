@@ -7,8 +7,9 @@ class TextInputFactory:
         system = platform.system().lower()
         
         if system == 'darwin':
-            from .macos.text_input import MacTextInput
-            return MacTextInput
+            from .macos.text_input import MacTextInput, OptimizedMacTextInput
+            from .macos.config import USE_OPTIMIZED_INPUT
+            return OptimizedMacTextInput if USE_OPTIMIZED_INPUT else MacTextInput
         elif system == 'windows':
             from .windows.text_input import WindowsTextInput
             return WindowsTextInput

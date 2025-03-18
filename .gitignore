@@ -33,4 +33,10 @@ env/
 
 # Project specific
 shortcuts.json
-*.log 
+*.log
+
+# Environment variables and secrets
+.env
+
+# Environment variables and secrets
+.env 

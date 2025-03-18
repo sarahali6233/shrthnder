@@ -205,3 +205,49 @@ Feel free to submit issues, fork the repository, and create pull requests for an
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+## AI-Powered Text Expansion
+
+Shrthnder now includes an AI-powered text expansion feature using Claude, a state-of-the-art language model from Anthropic:
+
+1. **AI Expansion**: When enabled, if a shorthand isn't found in your current profile, Shrthnder will attempt to expand it using AI.
+
+2. **Context-Aware**: The AI considers the context (your current profile) when expanding text, providing more relevant expansions.
+
+3. **Enabling AI Expansion**:
+
+   - In the main window, check the "Use AI for unknown shortcuts" option
+   - The AI expansion service runs locally on your machine at http://127.0.0.1:8000
+
+4. **API Requirements**:
+   - You need an Anthropic API key to use the AI expansion feature
+   - Set your API key as an environment variable: `export ANTHROPIC_API_KEY=your_key_here`
+   - For Windows: `set ANTHROPIC_API_KEY=your_key_here`
+
+### Setting Up Anthropic API Key
+
+1. Get an API key from [Anthropic](https://www.anthropic.com/product)
+2. Set up the API key using one of these methods:
+
+**Option 1: Using a .env file (Recommended)**:
+
+```bash
+# Create a file named .env in the same directory as shrthnder.py with this content:
+ANTHROPIC_API_KEY=your_key_here
+```
+
+**Option 2: Using environment variables**
+
+macOS/Linux:
+
+```bash
+export ANTHROPIC_API_KEY=your_key_here
+```
+
+Windows:
+
+```bash
+set ANTHROPIC_API_KEY=your_key_here
+```
+
+**Option 3**: Add the API key to your environment variables permanently through your operating system settings.
