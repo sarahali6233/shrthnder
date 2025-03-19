@@ -90,11 +90,12 @@ class KeyboardController:
         self.keyboard_listener = None
         self.text_input = TextInputFactory.get_text_input()
         self.last_key_time = 0
-        self.key_cooldown = 0.01  # Reduced from 0.05 to 0.01 for faster response
+        self.key_cooldown = 0.03  # Increased from 0.01 to 0.03 for better key deduplication
         self.pending_keys = []  # Queue for pending key events
         self.max_queue_size = 100  # Maximum number of pending keys to prevent memory issues
         self.queue_warning_threshold = 80  # Warn when queue reaches 80% capacity
         self.use_ai_expansion = False  # Flag to control AI expansion
+        self.last_key = None  # Store the last processed key for deduplication
 
     def setup_logger(self):
         logger = logging.getLogger('shrthnder')
@@ -193,21 +194,31 @@ class KeyboardController:
 
     def on_press(self, key):
         try:
+            # Simple deduplication for very fast repeated keys
+            current_time = time.time()
+            if self.last_key == key and current_time - self.last_key_time < self.key_cooldown:
+                return  # Skip if this is the same key pressed too quickly
+                
             # Add key to pending queue if not full
             if len(self.pending_keys) < self.max_queue_size:
-                self.pending_keys.append(key)
+                self.pending_keys.append((key, current_time))  # Store key with timestamp
                 self._check_queue_size()  # Monitor queue size
             else:
                 self.logger.warning("Key queue full, dropping oldest key")
                 self.pending_keys.pop(0)  # Remove oldest key
-                self.pending_keys.append(key)  # Add new key
+                self.pending_keys.append((key, current_time))  # Add new key
             
-            # Process all pending keys
-            current_time = time.time()
+            # Only process keys if enough time has elapsed since last processing
             if current_time - self.last_key_time >= self.key_cooldown:
+                # Process all pending keys
                 while self.pending_keys:
-                    next_key = self.pending_keys.pop(0)
+                    next_key, key_time = self.pending_keys.pop(0)
+                    # Skip keys that are too close in time to each other (especially repeated keys)
+                    if self.pending_keys and key_time - self.pending_keys[0][1] < self.key_cooldown * 0.5:
+                        continue
                     self._process_key(next_key)
+                    self.last_key = next_key  # Update last processed key
+                
                 self.last_key_time = current_time
                 
         except Exception as e:
@@ -218,22 +229,51 @@ class KeyboardController:
 
     def _process_key(self, key):
         try:
-            # Check for expansion triggers
-            if key == Key.space or (hasattr(key, 'char') and key.char in self.punctuation_triggers):
-                trigger_char = ' ' if key == Key.space else key.char
-                if self.current_word.lower() in self.profiles[self.current_profile]:
-                    self.check_and_expand(trigger_char)
-                self.current_word = ""  # Reset current word
+            # Handle backspace key specially
+            if key == Key.backspace or key == Key.delete:
+                # Only update internal word state, don't inject keystrokes
+                if self.current_word:
+                    self.current_word = self.current_word[:-1]
+                    self.logger.info(f"Backspace pressed, current word now: {self.current_word}")
                 return
 
             # Only process character keys
             if hasattr(key, 'char') and key.char:
                 char = key.char
                 transformed_char = char
+                layout = self.layout_manager.layout
+                
+                # Special handling for comma and period in Hamlak layout
+                if layout == "hamlak":
+                    if char == ',':
+                        self.text_input.delete_chars(1)
+                        self.text_input.insert_text('y')
+                        self.current_word += 'y'
+                        self.logger.info(f"Key pressed: {char}, transformed to: y (Layout: {layout})")
+                        return
+                    elif char == '.':
+                        self.text_input.delete_chars(1)
+                        self.text_input.insert_text('k')
+                        self.current_word += 'k'
+                        self.logger.info(f"Key pressed: {char}, transformed to: k (Layout: {layout})")
+                        return
+                
+                # Check for expansion triggers
+                if key == Key.space or (hasattr(key, 'char') and key.char in self.punctuation_triggers):
+                    trigger_char = ' ' if key == Key.space else key.char
+                    if self.current_word.lower() in self.profiles[self.current_profile]:
+                        self.check_and_expand(trigger_char)
+                    else:
+                        # For spaces that don't trigger expansion, still add to current word
+                        if trigger_char == ' ':
+                            self.current_word += ' '
+                        # Reset word after punctuation
+                        else:
+                            self.current_word = ""
+                    return
                 
                 try:
                     # Get the current layout
-                    layout = self.layout_manager.layout
                     layout_map = self.layout_manager.layout_manager.current_layout
                     
                     # First map the physical key to its QWERTY position
@@ -256,11 +296,22 @@ class KeyboardController:
                     else:
                         # Get the character that should be typed in this position
                         transformed = layout_map.get(qwerty_pos, qwerty_pos)
-                        if transformed != char:
-                            self.text_input.delete_chars(1)
-                            # Respect original case for all characters
-                            transformed_char = transformed.upper() if char.isupper() else transformed.lower()
-                            self.text_input.insert_text(transformed_char)
+                        
+                        # Special handling for Hamlak layout to prevent immediate deletion issues
+                        if layout == "hamlak":
+                            if transformed != char:
+                                # Delete the original character first
+                                self.text_input.delete_chars(1)
+                                # Then insert the transformed character
+                                transformed_char = transformed.upper() if char.isupper() else transformed.lower()
+                                self.text_input.insert_text(transformed_char)
+                        else:
+                            # Standard handling for other layouts
+                            if transformed != char:
+                                self.text_input.delete_chars(1)
+                                # Respect original case for all characters
+                                transformed_char = transformed.upper() if char.isupper() else transformed.lower()
+                                self.text_input.insert_text(transformed_char)
                     
                     # Add the character to current word
                     self.current_word += transformed_char
