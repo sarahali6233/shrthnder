@@ -96,6 +96,7 @@ class KeyboardController:
         self.queue_warning_threshold = 80  # Warn when queue reaches 80% capacity
         self.use_ai_expansion = False  # Flag to control AI expansion
         self.last_key = None  # Store the last processed key for deduplication
+        self.max_expansion_length = 30  # Maximum number of characters to consider for shortcut lookup
 
     def setup_logger(self):
         logger = logging.getLogger('shrthnder')
@@ -196,9 +197,12 @@ class KeyboardController:
         try:
             # Simple deduplication for very fast repeated keys
             current_time = time.time()
+            
+            # More sophisticated deduplication based on both key and time
             if self.last_key == key and current_time - self.last_key_time < self.key_cooldown:
+                self.logger.info(f"Skipping duplicate key event: {key}")
                 return  # Skip if this is the same key pressed too quickly
-                
+            
             # Add key to pending queue if not full
             if len(self.pending_keys) < self.max_queue_size:
                 self.pending_keys.append((key, current_time))  # Store key with timestamp
@@ -208,18 +212,30 @@ class KeyboardController:
                 self.pending_keys.pop(0)  # Remove oldest key
                 self.pending_keys.append((key, current_time))  # Add new key
             
-            # Only process keys if enough time has elapsed since last processing
-            if current_time - self.last_key_time >= self.key_cooldown:
-                # Process all pending keys
-                while self.pending_keys:
+            # Process the key immediately to improve responsiveness
+            self._process_key(key)
+            self.last_key = key
+            self.last_key_time = current_time
+            
+            # Check if we should process any other pending keys
+            if len(self.pending_keys) > 1:
+                # Process the remaining queue if it's getting large
+                # This helps ensure we don't miss keys during rapid typing
+                self.logger.info(f"Processing remaining queue of {len(self.pending_keys)} keys")
+                while len(self.pending_keys) > 0:
                     next_key, key_time = self.pending_keys.pop(0)
-                    # Skip keys that are too close in time to each other (especially repeated keys)
-                    if self.pending_keys and key_time - self.pending_keys[0][1] < self.key_cooldown * 0.5:
+                    # Skip the key we just processed
+                    if next_key == key:
+                        continue
+                    # Skip keys that are too close in time (likely duplicates)
+                    if self.pending_keys and abs(key_time - self.pending_keys[0][1]) < self.key_cooldown * 0.5:
+                        self.logger.info(f"Skipping key too close to next key: {next_key}")
                         continue
                     self._process_key(next_key)
-                    self.last_key = next_key  # Update last processed key
-                
-                self.last_key_time = current_time
+                    self.last_key = next_key
+            else:
+                # If we have exactly one key in the queue, it's the one we just processed
+                self.pending_keys = []
                 
         except Exception as e:
             self.logger.error(f"Error in on_press: {e}")
@@ -237,6 +253,69 @@ class KeyboardController:
                     self.logger.info(f"Backspace pressed, current word now: {self.current_word}")
                 return
 
+            # Log the key being processed
+            if key == Key.space:
+                self.logger.info(f"Processing space key, current word: '{self.current_word}'")
+            elif hasattr(key, 'char'):
+                self.logger.info(f"Processing key '{key.char}', current word: '{self.current_word}'")
+
+            # Check for expansion triggers first (space or punctuation)
+            if key == Key.space or (hasattr(key, 'char') and key.char in self.punctuation_triggers):
+                trigger_char = ' ' if key == Key.space else key.char
+                layout = self.layout_manager.layout
+                
+                # Save the current word for potential expansion
+                word_to_check = self.current_word
+                
+                self.logger.info(f"Expansion trigger detected: '{trigger_char}', checking if '{word_to_check}' is a shortcut")
+
+                # Check if we have a potential shortcut 
+                # (avoid empty checks and single character "shortcuts" which are likely not intentional)
+                if len(word_to_check.strip()) > 1:
+                    # Special case for Hamlak layout with comma and period
+                    if layout == "hamlak" and hasattr(key, 'char'):
+                        if key.char == ',':
+                            # Use 'y' as the inserted character after expansion
+                            self.logger.info("Using 'y' as trigger for Hamlak comma")
+                            if self.check_and_expand('y'):
+                                return
+                        elif key.char == '.':
+                            # Use 'k' as the inserted character after expansion
+                            self.logger.info("Using 'k' as trigger for Hamlak period")
+                            if self.check_and_expand('k'):
+                                return
+                    
+                    # Normal expansion for other cases
+                    self.logger.info(f"Triggering normal expansion with '{trigger_char}'")
+                    if self.check_and_expand(trigger_char):
+                        return
+                
+                # Only after checking for expansion, handle special Hamlak transformations
+                if layout == "hamlak" and hasattr(key, 'char'):
+                    if key.char == ',':
+                        self.text_input.delete_chars(1)
+                        self.text_input.insert_text('y')
+                        self.current_word = "" # Reset word after punctuation
+                        self.logger.info(f"Key pressed: {key.char}, transformed to: y (Layout: {layout})")
+                        return
+                    elif key.char == '.':
+                        self.text_input.delete_chars(1)
+                        self.text_input.insert_text('k')
+                        self.current_word = "" # Reset word after punctuation
+                        self.logger.info(f"Key pressed: {key.char}, transformed to: k (Layout: {layout})")
+                        return
+                
+                # For spaces that don't trigger expansion, still add to current word
+                if trigger_char == ' ':
+                    self.current_word += ' '
+                    self.logger.info(f"Added space to current word: '{self.current_word}'")
+                # Reset word after punctuation
+                else:
+                    self.current_word = ""
+                    self.logger.info("Reset current word after punctuation")
+                
+                return
+
             # Only process character keys
             if hasattr(key, 'char') and key.char:
                 char = key.char
@@ -244,6 +323,7 @@ class KeyboardController:
                 layout = self.layout_manager.layout
                 
                 # Special handling for comma and period in Hamlak layout
+                # This now only handles the case where they are NOT expansion triggers
                 if layout == "hamlak":
                     if char == ',':
                         self.text_input.delete_chars(1)
@@ -257,20 +337,6 @@ class KeyboardController:
                         self.current_word += 'k'
                         self.logger.info(f"Key pressed: {char}, transformed to: k (Layout: {layout})")
                         return
-                
-                # Check for expansion triggers
-                if key == Key.space or (hasattr(key, 'char') and key.char in self.punctuation_triggers):
-                    trigger_char = ' ' if key == Key.space else key.char
-                    if self.current_word.lower() in self.profiles[self.current_profile]:
-                        self.check_and_expand(trigger_char)
-                    else:
-                        # For spaces that don't trigger expansion, still add to current word
-                        if trigger_char == ' ':
-                            self.current_word += ' '
-                        # Reset word after punctuation
-                        else:
-                            self.current_word = ""
-                    return
                 
                 try:
                     # Get the current layout
@@ -329,29 +395,84 @@ class KeyboardController:
 
     def check_and_expand(self, trigger_char=' '):
         if not self.current_word:
-            return
+            self.logger.info("Cannot expand: current_word is empty")
+            return False
 
         try:
-            # Get the expansion from current profile's shortcuts
-            expansion = self.profiles[self.current_profile].get(self.current_word.lower())
+            # Trim trailing whitespace and limit length to prevent overly long lookups
+            if len(self.current_word) > self.max_expansion_length:
+                # Only consider the last N characters for expansion
+                check_word = self.current_word[-self.max_expansion_length:].rstrip()
+            else:
+                check_word = self.current_word.rstrip()
             
-            # If no expansion found and AI expansion is enabled, try AI expansion
+            # Try to find a match with the entire word first
+            word_to_expand = check_word.lower()
+            self.logger.info(f"Attempting to expand '{word_to_expand}' with trigger '{trigger_char}'")
+            
+            # First try exact match
+            expansion = self.profiles[self.current_profile].get(word_to_expand)
+            
+            # If no exact match, try with trailing spaces removed
+            if not expansion:
+                stripped_word = word_to_expand.strip()
+                if stripped_word != word_to_expand:
+                    self.logger.info(f"Trying with trailing spaces removed: '{stripped_word}'")
+                    expansion = self.profiles[self.current_profile].get(stripped_word)
+                    if expansion:
+                        word_to_expand = stripped_word
+                        # Adjust check_word to match the actual match
+                        offset = check_word.lower().rfind(stripped_word)
+                        if offset >= 0:
+                            check_word = check_word[offset:offset+len(stripped_word)]
+            
+            # If no match with the whole word, try to find a match with the last word only
+            if not expansion and ' ' in word_to_expand:
+                # Split by spaces and get the last part
+                last_word = word_to_expand.split()[-1]
+                self.logger.info(f"No match for full text, trying last word: '{last_word}'")
+                expansion = self.profiles[self.current_profile].get(last_word)
+                if expansion:
+                    # If the match is for the last word only, adjust what gets deleted
+                    word_to_expand = last_word
+                    # Find the position of the last word in the original text
+                    offset = check_word.lower().rfind(last_word)
+                    if offset >= 0:
+                        check_word = check_word[offset:offset+len(last_word)]
+            
+            # If still no expansion found and AI expansion is enabled, try AI expansion
             if not expansion and self.use_ai_expansion:
-                expansion = self.get_ai_expansion(self.current_word)
+                expansion = self.get_ai_expansion(word_to_expand)
             
             if expansion:
                 # Transform the expansion based on the current layout
                 transformed_expansion = self.layout_manager.layout_manager.transform_text(expansion)
                 
-                # Delete the original text plus one extra character to prevent duplication
-                self.text_input.delete_chars(len(self.current_word) + 1)
+                self.logger.info(f"Expanding '{word_to_expand}' to '{transformed_expansion}'")
+                
+                # Calculate how many characters to delete (the matched word plus trigger char)
+                chars_to_delete = len(check_word) + 1
+                self.logger.info(f"Deleting {chars_to_delete} characters")
+                
+                # Delete the original text plus one extra character (the trigger)
+                self.text_input.delete_chars(chars_to_delete)
                 
                 # Insert the expanded text with the trigger character
                 self.text_input.insert_text(transformed_expansion + trigger_char)
                 
+                # Reset current word after expansion
+                self.current_word = ""
+                self.logger.info("Reset current_word after expansion")
+                return True
+            else:
+                self.logger.info(f"No expansion found for '{word_to_expand}'")
+                return False
+                
         except Exception as e:
             self.logger.error(f"Error in check_and_expand: {e}")
-            return
+            # Reset current word on error to prevent issues
+            self.current_word = ""
+            return False
             
     def get_ai_expansion(self, text):
         """Use the AI service to expand text."""
